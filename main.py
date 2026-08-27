@@ -1,14 +1,19 @@
-from LAMELLAR import *
-from ProcessSnapshot import *
+from LAMELLAR import printSystemUsage, startMenu, monitorPrograms, monitorSystem
 
 
 def main():
+
+    printSystemUsage()
+
     targetProcess = startMenu()
-    monitorPrograms()
 
-
+    if targetProcess is None:
+        return
+    monitorSystem(targetProcess)
+    monitorPrograms(targetProcess)
 
 
 
 if __name__ == "__main__":
+
     main()
