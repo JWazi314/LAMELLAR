@@ -1,3 +1,5 @@
+from datetime import datetime
+
 class PerformanceEvent:
 
     def __init__(self, pid, name, eventType, oldValue, newValue, severity):
@@ -10,6 +12,8 @@ class PerformanceEvent:
 
         self.eventType = eventType
         self.severity = severity
+
+        self.time = datetime.now()
 
 
     def __repr__(self):

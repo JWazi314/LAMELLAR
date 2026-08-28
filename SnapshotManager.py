@@ -1,4 +1,6 @@
 import psutil
+import datetime
+from pathlib import Path
 
 from classes import ProcessSnapshot
 from classes import CombinedSnapshot
@@ -11,6 +13,9 @@ def getProcessSnapShot():
     for process in psutil.process_iter():
 
         try:
+            
+            path = process.exe()
+            drive = Path(path).drive
 
             cpu = process.cpu_percent() / psutil.cpu_count()
             io = process.io_counters()
@@ -18,6 +23,8 @@ def getProcessSnapShot():
             snapshot = ProcessSnapshot(
                 process.pid,
                 process.name(),
+                path,
+                drive,
                 cpu,
                 process.memory_percent(),
                 io.read_bytes,
@@ -46,6 +53,8 @@ def combineProcesses(processSnapshots):
 
             combined[name] = CombinedSnapshot(
                 name,
+                snapshot.path,
+                snapshot.drive,
                 snapshot.cpu,
                 snapshot.memory,
                 [snapshot.pid],

@@ -1,10 +1,12 @@
 import psutil
+import datetime
 import time
 
 from collections import deque
 
 from SnapshotManager import getProcessSnapShot, combineProcesses
-from PerformanceAnalyzer import compareSnapShots, getSnapShotCPUAverage, getSnapShotMEMORYAverage
+from PerformanceAnalyzer import compareSnapShots, getNewAverage
+from DatabaseManager import savePrograms
 
 #basic system info to show sucessful connection
 def printSystemUsage():
@@ -169,13 +171,31 @@ def monitorSystem(targetProcess):
 def monitorPrograms(targetProcess):
 
     snapShotDeque = deque(maxlen=300)
+    cpuAverages = {}
+    memoryAverages = {}
 
     while True:
 
         separatedSnapShot = getProcessSnapShot()
+
         combinedSnapShot = combineProcesses(separatedSnapShot)
 
         snapShotDeque.append(combinedSnapShot)
+
+        for name, process in combinedSnapShot.items():
+
+          if name not in cpuAverages:
+
+            cpuAverages[name] = process.cpu
+            memoryAverages[name] = process.memory
+
+          else:
+
+            cpuAverages[name] = getNewAverage(cpuAverages[name], process.cpu)
+            memoryAverages[name] = getNewAverage(memoryAverages[name], process.memory)
+
+        savePrograms(combinedSnapShot,cpuAverages,memoryAverages)
+
 
         dequeLength = len(snapShotDeque)
 
@@ -186,28 +206,22 @@ def monitorPrograms(targetProcess):
 
             compareSnapShots(previous, current)
 
-        if dequeLength % 5 == 0:
 
-            targetName = targetProcess.name
+        targetName = targetProcess.name
+        current = snapShotDeque[-1]
 
-            fiveCpuAverage = getSnapShotCPUAverage(snapShotDeque, targetName)
-            fiveMemoryAverage = getSnapShotMEMORYAverage(snapShotDeque,targetName)
+        if targetName not in current:
 
-            current = snapShotDeque[-1]
-
-            if targetName not in current:
-
-                print(f"{targetName} is no longer running.")
-                return
-
+            print(f"{targetName} is no longer running.")
+            return
+        else:
             currentTarget = current[targetName]
 
-            print()
-            print(
-                f"Program: {currentTarget} | "
-                f"5 Second CPU Average: {fiveCpuAverage:.2f}% | "
-                f"5 Second Memory Average: {fiveMemoryAverage:.2f}%"
-            )
+        print()
+        print(
+            f"Program: {currentTarget} | CPUAverage: {cpuAverages[targetName]:.2f} | MemoryAverage: {memoryAverages[targetName]:.2f}"
+
+        )
         time.sleep(1)
 
 

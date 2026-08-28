@@ -1,4 +1,5 @@
 from classes import PerformanceEvent
+import datetime
 
 
 def cpuCheck(previous, current):
@@ -113,49 +114,13 @@ def compareSnapShots(previous, current):
 
 
 
-def getSnapShotCPUAverage(monitorDq, targetProgram, sampleCount=5):
+def getNewAverage(oldAverage,currentValue, alpha = 0.05):
 
-    recentSnapshots = list(monitorDq)[-sampleCount:]
+    if oldAverage is None:
+        return currentValue
 
-    cpuValues = []
-
-    for snapshot in recentSnapshots:
-
-        if targetProgram in snapshot:
-
-            cpuValues.append(
-                snapshot[targetProgram].cpu
-            )
-
-    if not cpuValues:
-        return 0
-
-    cpuAverage = sum(cpuValues) / len(cpuValues)
-
-    return cpuAverage
-
-
-
-def getSnapShotMEMORYAverage(monitorDq, targetProgram, sampleCount=5):
-
-    recentSnapshots = list(monitorDq)[-sampleCount:]
-
-    memoryValues = []
-
-    for snapshot in recentSnapshots:
-
-        if targetProgram in snapshot:
-
-            memoryValues.append(
-                snapshot[targetProgram].memory
-            )
-
-    if not memoryValues:
-        return 0
-
-    memoryAverage = sum(memoryValues) / len(memoryValues)
-
-    return memoryAverage
+    newAverage = alpha * currentValue + ( 1 - alpha) * oldAverage
+    return newAverage
 
 
 

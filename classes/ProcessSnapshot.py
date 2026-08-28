@@ -1,9 +1,14 @@
+from datetime import datetime
+
 class ProcessSnapshot:
 
-    def __init__(self, pid, name, cpu, memory, diskRead, diskWrite):
+    def __init__(self, pid, name, path, drive, cpu, memory, diskRead, diskWrite):
 
         self.pid = pid
         self.name = name
+
+        self.path = path
+        self.drive = drive
 
         self.cpu = cpu
         self.memory = memory
@@ -11,6 +16,7 @@ class ProcessSnapshot:
         self.diskRead = diskRead
         self.diskWrite = diskWrite
 
+        self.time = datetime.now()
 
     def __repr__(self):
 
