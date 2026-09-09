@@ -1,5 +1,4 @@
 from classes import PerformanceEvent
-import datetime
 
 
 def cpuCheck(previous, current):
@@ -90,27 +89,7 @@ def compareSnapShots(previous, current):
     cpuEvents = cpuCheck(previous, current)
     memoryEvents = memoryCheck(previous, current)
 
-    for event in cpuEvents:
-
-        print(
-            event.name,
-            event.eventType,
-            f"{event.oldValue:.2f}%",
-            "->",
-            f"{event.newValue:.2f}%",
-            event.severity
-        )
-
-    for event in memoryEvents:
-
-        print(
-            event.name,
-            event.eventType,
-            f"{event.oldValue:.2f}%",
-            "->",
-            f"{event.newValue:.2f}%",
-            event.severity
-        )
+    return cpuEvents + memoryEvents
 
 
 

@@ -1,23 +1,19 @@
-from LAMELLAR import *
-from DatabaseManager import createTables,getDBinfo
-from datetime import datetime
+from LAMELLAR import printSystemUsage, startMenu, monitorPrograms
+from DatabaseManager import createTables, getDBinfo
 
 
 def main():
 
+    createTables()
     getDBinfo()
     printSystemUsage()
-
-    createTables()
 
     targetProcess = startMenu()
 
     if targetProcess is None:
         return
 
-    monitorSystem(targetProcess)
     monitorPrograms(targetProcess)
-
 
 
 if __name__ == "__main__":

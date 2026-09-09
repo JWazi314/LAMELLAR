@@ -1,14 +1,21 @@
 import psutil
-import datetime
 import time
+import sys
 
 from collections import deque
 
+from classes import PerformanceEvent
 from SnapshotManager import getProcessSnapShot, combineProcesses
 from PerformanceAnalyzer import compareSnapShots, getNewAverage
-from DatabaseManager import savePrograms
+from DatabaseManager import (
+    savePrograms,
+    savePerformanceEvents,
+    saveProgramHistory,
+    loadProgramAverages,
+    getProgramBaseline
+)
 
-#basic system info to show sucessful connection
+
 def printSystemUsage():
 
     cpu = psutil.cpu_percent(interval=1)
@@ -20,7 +27,6 @@ def printSystemUsage():
     print("Disk:", disk, "%")
 
 
-#Start menu for the program
 def startMenu():
 
     while True:
@@ -66,7 +72,6 @@ def startMenu():
             time.sleep(1)
 
 
-# get one specific program to monitor closer than the others
 def assignTargetProgram(programSnapShot):
 
     while True:
@@ -90,7 +95,6 @@ def assignTargetProgram(programSnapShot):
         print("Program not found, try again.")
 
 
-# sort processes by memory to better help user choose a process
 def memorySortedPrograms():
 
     programs = {}
@@ -130,98 +134,304 @@ def memorySortedPrograms():
     return programs
 
 
-def monitorSystem(targetProcess):
-    systemEvents = {}
-    path = ""
+def stopRequested():
 
-    for pid in targetProcess.pids:
-        try:
-            process = psutil.Process(pid)
-            path = process.exe()
+    if sys.platform != "win32":
+        return False
 
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
+    try:
+        import msvcrt
+    except ImportError:
+        return False
+
+    if not msvcrt.kbhit():
+        return False
+
+    key = msvcrt.getwch()
+    return key.lower() == "q" or key in ("\r", "\n")
 
 
-    cpu = psutil.cpu_percent(interval=1)
+def waitForInterval(seconds):
+
+    deadline = time.monotonic() + seconds
+
+    while time.monotonic() < deadline:
+
+        if stopRequested():
+            return True
+
+        time.sleep(0.1)
+
+    return False
+
+
+def systemSeverity(value):
+
+    if value >= 90:
+        return "Large"
+
+    return "Medium"
+
+
+def checkSystem(targetProcess):
+
+    events = []
+
+    cpu = psutil.cpu_percent(interval=None)
     memory = psutil.virtual_memory().percent
 
-    targetdir = path[0:2]
-    print(targetdir)
-    disk = psutil.disk_usage(f"{targetdir}\\").percent
+    drive = targetProcess.drive or "C:"
 
+    try:
+        disk = psutil.disk_usage(f"{drive}\\").percent
+    except (OSError, ValueError):
+        disk = psutil.disk_usage("C:\\").percent
 
     if cpu > 80:
-        print(f"HIGH SYSTEM CPU USAGE {disk}%")
-        systemEvents["Cpu"] = cpu
+
+        print(f"HIGH SYSTEM CPU USAGE {cpu:.1f}%")
+        events.append(
+            PerformanceEvent(
+                [],
+                "SYSTEM",
+                "System CPU",
+                80,
+                cpu,
+                systemSeverity(cpu)
+            )
+        )
+
     if memory > 80:
-        print(f"HIGH SYSTEM MEMORY USAGE {memory}%")
-        systemEvents["Memory"] = memory
+
+        print(f"HIGH SYSTEM MEMORY USAGE {memory:.1f}%")
+        events.append(
+            PerformanceEvent(
+                [],
+                "SYSTEM",
+                "System Memory",
+                80,
+                memory,
+                systemSeverity(memory)
+            )
+        )
+
     if disk > 80:
-        print(f"HIGH DISK USAGE {disk}%")
-        systemEvents["Disk"] = disk
-    time.sleep(1)
+
+        print(f"HIGH DISK USAGE {disk:.1f}% on {drive}")
+        events.append(
+            PerformanceEvent(
+                [],
+                "SYSTEM",
+                "System Disk",
+                80,
+                disk,
+                systemSeverity(disk)
+            )
+        )
+
+    return events, cpu, memory, disk
 
 
+def printScanSummary(
+    targetName,
+    duration,
+    samples,
+    stillRunning,
+    stopReason,
+    peakCpu,
+    peakMemory,
+    avgCpu,
+    avgMemory,
+    baselineCpu,
+    baselineMemory,
+    severityCounts,
+    targetEventCount,
+    systemHighCpu,
+    systemHighMemory,
+    systemHighDisk
+):
+
+    print()
+    print("=== Scan complete ===")
+    print(f"Target: {targetName}")
+    print(f"Duration: {duration:.1f}s")
+    print(f"Samples: {samples}")
+    print(f"Still running: {'Yes' if stillRunning else 'No'}")
+    print(f"Stopped because: {stopReason}")
+
+    baselineCpuText = (
+        f"{baselineCpu:.2f}%" if baselineCpu is not None else "none"
+    )
+    baselineMemoryText = (
+        f"{baselineMemory:.2f}%" if baselineMemory is not None else "none"
+    )
+
+    print(
+        f"CPU  avg {avgCpu:.2f}%  peak {peakCpu:.2f}%  "
+        f"stored baseline {baselineCpuText}"
+    )
+    print(
+        f"RAM  avg {avgMemory:.2f}%  peak {peakMemory:.2f}%  "
+        f"stored baseline {baselineMemoryText}"
+    )
+    print(
+        f"Events: {sum(severityCounts.values())} "
+        f"(Large: {severityCounts.get('Large', 0)}, "
+        f"Medium: {severityCounts.get('Medium', 0)}, "
+        f"Small: {severityCounts.get('Small', 0)})"
+    )
+    print(f"Target events: {targetEventCount}")
+    print(
+        f"System high samples — CPU: {systemHighCpu}, "
+        f"RAM: {systemHighMemory}, Disk: {systemHighDisk}"
+    )
 
 
-
-# recursive monitor system.  takes 2 snapshots objects, combine multiple if same process then put it in deque.
-# then compares changes and does multple average checks
 def monitorPrograms(targetProcess):
 
     snapShotDeque = deque(maxlen=300)
-    cpuAverages = {}
-    memoryAverages = {}
+    cpuAverages, memoryAverages = loadProgramAverages()
 
-    while True:
+    targetName = targetProcess.name
+    baselineCpu, baselineMemory = getProgramBaseline(targetName)
 
-        separatedSnapShot = getProcessSnapShot()
+    samples = 0
+    peakCpu = 0.0
+    peakMemory = 0.0
+    sumCpu = 0.0
+    sumMemory = 0.0
+    targetEventCount = 0
+    systemHighCpu = 0
+    systemHighMemory = 0
+    systemHighDisk = 0
+    stillRunning = True
+    stopReason = "stopped by user"
+    severityCounts = {"Small": 0, "Medium": 0, "Large": 0}
 
-        combinedSnapShot = combineProcesses(separatedSnapShot)
+    print()
+    print("Starting scan. Press Q or Enter to finish, or Ctrl+C.")
+    print("Priming CPU samples...")
 
-        snapShotDeque.append(combinedSnapShot)
+    getProcessSnapShot()
+    psutil.cpu_percent(interval=None)
+    time.sleep(1)
 
-        for name, process in combinedSnapShot.items():
+    scanStart = time.monotonic()
 
-          if name not in cpuAverages:
+    try:
 
-            cpuAverages[name] = process.cpu
-            memoryAverages[name] = process.memory
+        while True:
 
-          else:
+            systemEvents, sysCpu, sysMem, sysDisk = checkSystem(targetProcess)
+            savePerformanceEvents(systemEvents)
 
-            cpuAverages[name] = getNewAverage(cpuAverages[name], process.cpu)
-            memoryAverages[name] = getNewAverage(memoryAverages[name], process.memory)
+            for event in systemEvents:
 
-        savePrograms(combinedSnapShot,cpuAverages,memoryAverages)
+                if event.eventType == "System CPU":
+                    systemHighCpu += 1
+                elif event.eventType == "System Memory":
+                    systemHighMemory += 1
+                elif event.eventType == "System Disk":
+                    systemHighDisk += 1
 
+            separatedSnapShot = getProcessSnapShot()
+            combinedSnapShot = combineProcesses(separatedSnapShot)
+            snapShotDeque.append(combinedSnapShot)
 
-        dequeLength = len(snapShotDeque)
+            for name, process in combinedSnapShot.items():
 
-        if dequeLength >= 2:
+                if name not in cpuAverages:
 
-            previous = snapShotDeque[-2]
-            current = snapShotDeque[-1]
+                    cpuAverages[name] = process.cpu
+                    memoryAverages[name] = process.memory
 
-            compareSnapShots(previous, current)
+                else:
 
+                    cpuAverages[name] = getNewAverage(
+                        cpuAverages[name],
+                        process.cpu
+                    )
+                    memoryAverages[name] = getNewAverage(
+                        memoryAverages[name],
+                        process.memory
+                    )
 
-        targetName = targetProcess.name
-        current = snapShotDeque[-1]
+            savePrograms(combinedSnapShot, cpuAverages, memoryAverages)
 
-        if targetName not in current:
+            if len(snapShotDeque) >= 2:
 
-            print(f"{targetName} is no longer running.")
-            return
-        else:
-            currentTarget = current[targetName]
+                events = compareSnapShots(snapShotDeque[-2], snapShotDeque[-1])
+                savePerformanceEvents(events)
 
+                for event in events:
+
+                    severityCounts[event.severity] = (
+                        severityCounts.get(event.severity, 0) + 1
+                    )
+
+                    if event.name == targetName:
+
+                        targetEventCount += 1
+                        print(
+                            event.name,
+                            event.eventType,
+                            f"{event.oldValue:.2f}%",
+                            "->",
+                            f"{event.newValue:.2f}%",
+                            event.severity
+                        )
+
+            if targetName not in combinedSnapShot:
+
+                print(f"{targetName} is no longer running.")
+                stillRunning = False
+                stopReason = "target process exited"
+                break
+
+            currentTarget = combinedSnapShot[targetName]
+            saveProgramHistory(currentTarget)
+
+            samples += 1
+            peakCpu = max(peakCpu, currentTarget.cpu)
+            peakMemory = max(peakMemory, currentTarget.memory)
+            sumCpu += currentTarget.cpu
+            sumMemory += currentTarget.memory
+
+            print(
+                f"Program: {currentTarget} | "
+                f"CPUAverage: {cpuAverages[targetName]:.2f} | "
+                f"MemoryAverage: {memoryAverages[targetName]:.2f} | "
+                f"SYS CPU {sysCpu:.1f}% RAM {sysMem:.1f}% Disk {sysDisk:.1f}%"
+            )
+
+            if waitForInterval(1):
+                stopReason = "stopped by user"
+                break
+
+    except KeyboardInterrupt:
+
+        stopReason = "stopped by user"
         print()
-        print(
-            f"Program: {currentTarget} | CPUAverage: {cpuAverages[targetName]:.2f} | MemoryAverage: {memoryAverages[targetName]:.2f}"
 
-        )
-        time.sleep(1)
+    duration = time.monotonic() - scanStart
+    avgCpu = (sumCpu / samples) if samples else 0.0
+    avgMemory = (sumMemory / samples) if samples else 0.0
 
-
+    printScanSummary(
+        targetName,
+        duration,
+        samples,
+        stillRunning,
+        stopReason,
+        peakCpu,
+        peakMemory,
+        avgCpu,
+        avgMemory,
+        baselineCpu,
+        baselineMemory,
+        severityCounts,
+        targetEventCount,
+        systemHighCpu,
+        systemHighMemory,
+        systemHighDisk
+    )
