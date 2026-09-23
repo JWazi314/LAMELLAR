@@ -1,4 +1,4 @@
-LAMELLAR is currently in development and is nowhere near finished.  
+LAMELLAR is currently in development.
 planning to add
 - Periodic scans
 - end scan diagnostics
